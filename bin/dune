@@ -1,4 +1,4 @@
 (executable
  (public_name funxychat)
  (name main)
- (libraries funxychat))
+ (libraries funxychat unix lwt lwt.unix logs.lwt yojson))
