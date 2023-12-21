@@ -1,0 +1,4 @@
+(executable
+ (public_name funxychat)
+ (name main)
+ (libraries funxychat))
