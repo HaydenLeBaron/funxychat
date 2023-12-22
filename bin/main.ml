@@ -1,56 +1,59 @@
 open Lwt
 
+(*BKMRK/INPROG: refactor code *)
 (*BKMRK/TODO: make multiclient by being able to vary the port (I think) *)
 (*BKMRK/TODO: test badly implemented client sending Json with the wrong field names and/or types. I think it will take the server down.*)
 (*BKMRK/TODO: get client to pass in name to put in prompt for eventual multi-client support *)
 (*BKMRK/TODO: implement hostname resolution *)
-(*BKMRK/TODO: refactor code *)
+(*BKMRK/FIXME: problem where sometimes the old server is running on the old port (could fix with port variation) *)
 
 let port = 12345
 
-module Comm = struct
-  type t =
-    | Msg of { payload : string; sent_at : float }
-    | Ack of { msg_sent_at : float }
-
-  let comm_to_json = function
-    | Ack { msg_sent_at } ->
-        `Assoc [ ("type", `String "Ack"); ("msg_sent_at", `Float msg_sent_at) ]
-    | Msg { payload; sent_at } ->
-        `Assoc
-          [
-            ("type", `String "Msg");
-            ("payload", `String payload);
-            ("sent_at", `Float sent_at);
-          ]
-
-  let json_to_comm json =
-    let open Yojson.Basic.Util in
-    let json = Yojson.Basic.from_string json in
-    match json |> member "type" |> to_string with
-    | "Ack" -> (
-        let msg_sent_at = json |> member "msg_sent_at" in
-        match msg_sent_at with
-        | `Null -> None
-        | `Float f -> Some (Ack { msg_sent_at = f })
-        | _ -> None)
-    | "Msg" -> (
-        let payload = json |> member "payload" |> to_string in
-        let sent_at = json |> member "sent_at" in
-        match sent_at with
-        | `Null -> None
-        | `Float f -> Some (Msg { payload; sent_at = f })
-        | _ -> None)
-    | _ -> None
-end
-
+(** Contains auxillary functions. *)
 module Helpers = struct
   let timestamp_to_utc_str timestamp =
     let open Unix in
     let tm = gmtime timestamp in
     Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (1900 + tm.tm_year)
       (1 + tm.tm_mon) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
+
+  let ( >> ) f g x = g (f x)
 end
+
+(** Contains communication structure(s) and related. *)
+module Comm = struct
+  open Helpers
+
+  type t =
+    | Msg of { sent_at : float; payload : string }
+    | Ack of { msg_sent_at : float }
+
+  let comm_to_json : t -> Yojson.Basic.t = function
+    | Ack { msg_sent_at } ->
+        `Assoc [ ("type", `String "Ack"); ("msg_sent_at", `Float msg_sent_at) ]
+    | Msg { sent_at ; payload  } ->
+        `Assoc
+          [
+            ("type", `String "Msg");
+            ("sent_at", `Float sent_at);
+            ("payload", `String payload);
+          ]
+
+  let json_to_comm : string -> t option =
+    Yojson.Basic.from_string >> function
+    | `Assoc [ ("type", `String "Ack"); ("msg_sent_at", `Float msg_sent_at) ] ->
+        Some (Ack { msg_sent_at })
+    | `Assoc
+        [
+          ("type", `String "Msg");
+          ("sent_at", `Float sent_at);
+          ("payload", `String payload);
+        ] ->
+        Some (Msg { sent_at ; payload })
+    | _ -> None
+end
+
+(*BKMRK/NOTE: Refactored to HERE ---- *)
 
 module Client = struct
   open Helpers
@@ -225,4 +228,5 @@ let () =
   let () = Logs.set_level (Some Logs.Info) in
   if Array.length Sys.argv <= 1 then Arg.usage options usage_msg
   else Arg.parse options (fun _ -> ()) usage_msg
+
 
