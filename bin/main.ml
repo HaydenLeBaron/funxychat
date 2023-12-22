@@ -62,6 +62,17 @@ let comm_to_json = function
             })
     | _ -> None*)
 
+let timestamp_to_utc_str timestamp =
+    let open Unix in
+    let tm = gmtime timestamp in
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+        (1900 + tm.tm_year)
+        (1 + tm.tm_mon)
+        tm.tm_mday
+        tm.tm_hour
+        tm.tm_min
+        tm.tm_sec
+
 let json_to_comm json =
     let open Yojson.Basic.Util in
     let json = Yojson.Basic.from_string json in
@@ -108,15 +119,16 @@ let handle_connection ic oc () =
                 comm |> fun comm ->
                     match comm with
                     | Some(Msg { payload; sent_at }) -> 
-                            Lwt_io.printf "Message received: %s, sent_at %s\n" payload (string_of_float sent_at) >>=
+                            Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload >>=
                             fun () -> (Ack { msg_sent_at=sent_at }
                             |> comm_to_json |> Yojson.Basic.to_string
                             |> Lwt_io.write_line oc)
                         >>= read_loop
                     | Some(Ack { msg_sent_at }) ->
-                        Lwt_io.printf "Ack received: %s\n" (string_of_float msg_sent_at) >>= read_loop
+                        let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
+                        Lwt_io.printf "Recieved + acknowledged in %sms\n" (string_of_float roundtrip_ms) >>= read_loop
                     | None -> Logs_lwt.info (fun m -> m "BKMRK/777 Recieved None") >>= read_loop)
-            | None -> Logs_lwt.info (fun m -> m "Connection closed 3") >>= return
+            | None -> Logs_lwt.info (fun m -> m "The client closed the connection") >>= return
     in
      Lwt.async write_loop; 
      read_loop () >>= fun () -> Lwt.wakeup_later stop_wakener (); return ()
@@ -175,16 +187,17 @@ let create_client ip_addr port =
                 comm |> fun comm ->
                 match comm with
                 | Some(Msg { payload; sent_at }) -> 
-                            Lwt_io.printf "Message received: %s, sent_at %s\n" payload (string_of_float sent_at) >>=
+                            Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload >>=
                             fun () -> (Ack { msg_sent_at=sent_at }
                             |> comm_to_json |> Yojson.Basic.to_string
                             |> Lwt_io.write_line oc) >>= read_loop
                 | Some( Ack { msg_sent_at } ) -> 
-                    Lwt_io.printf "Ack received: %s\n" (string_of_float msg_sent_at) >>= read_loop
+                    let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
+                    Lwt_io.printf "Recieved + acknowledged in %sms\n" (string_of_float roundtrip_ms) >>= read_loop
                 | None -> Logs_lwt.info (fun m -> m "BKMRK/888 Recieved None") >>= read_loop
                 )
                 (* Lwt_io.printf "Message received: %s\n" msg >>= read_loop *)
-            | None -> Logs_lwt.info (fun m -> m "Connection closed 999") >>= return
+            | None -> Logs_lwt.info (fun m -> m "The server closed the connection") >>= return
                 in
     Lwt.async write_loop;
     read_loop () >>= fun () -> Lwt.wakeup_later stop_wakener (); return ()
@@ -210,4 +223,4 @@ let options =
      if Array.length Sys.argv <= 1 then Arg.usage options usage_msg
      else Arg.parse options (fun _ -> ()) usage_msg
 
-
+ 
