@@ -1,15 +1,12 @@
 open Lwt
 open Lwt.Infix
 
-(*BKMRK/INPROG: refactor code *)
-(*BKMRK/TODO: get rid of unnecessary if/then paths and replace with exception handling *)
+(*BKMRK/TODO: Handle exceptions from malicious clients *)
+(*  BKMRK/TODO: test badly implemented client sending Json with the wrong field names and/or types. I think it will take the server down.*)
 (*BKMRK/TODO: make multiclient by being able to vary the port (I think) *)
-(*BKMRK/TODO: test badly implemented client sending Json with the wrong field names and/or types. I think it will take the server down.*)
-(*BKMRK/TODO: get client to pass in name to put in prompt for eventual multi-client support *)
+(*BKMRK/TODO: get client and server to pass in name to put in prompt for eventual multi-client support *)
 (*BKMRK/TODO: implement hostname resolution *)
 (*BKMRK/FIXME: problem where sometimes the old server is running on the old port (could fix with port variation) *)
-
-let port = 12345
 
 (** Contains auxillary functions. *)
 module Helpers = struct
@@ -23,7 +20,7 @@ module Helpers = struct
   let log_info s = Logs_lwt.info (fun m -> m s)
 end
 
-(** Contains communication structure(s) and related. *)
+(** Communication structure(s) and related. *)
 module Comm = struct
   open Helpers
 
@@ -59,40 +56,47 @@ module Comm = struct
   let str_to_comm = Yojson.Basic.from_string >> json_to_comm
 end
 
-module Client = struct
+(** Patterns shared between the client and server *)
+module Shared = struct
   open Helpers
-  open Comm
+  (* NOTE: sharing this much code is only possible because the
+     requirements specify a client and server with mostly
+     symmetrical functionality. Client and Server code should be
+     separated if requirements change significantly. *)
 
-  let rec _write_loop oc stop =
+  let rec _write_loop (oc : Lwt_io.output_channel) (stop : unit Lwt.t) :
+      unit Lwt.t =
     Lwt.pick
       [
         (Lwt_io.read_line_opt Lwt_io.stdin
         >>= (function
               | Some line ->
-                  write_comm oc
+                  Comm.write_comm oc
                   @@ Msg { payload = line; sent_at = Unix.gettimeofday () }
               | None -> log_info "Caught EOF (^D)")
         >>= fun () -> _write_loop oc stop);
         stop;
       ]
 
-  let rec _read_loop ic oc =
+  let rec _read_loop (ic : Lwt_io.input_channel) (oc : Lwt_io.output_channel) =
     Lwt_io.read_line_opt ic
     >>= function
     | Some json_str ->
-        (match str_to_comm json_str with
+        (match Comm.str_to_comm json_str with
         | Some (Msg { sent_at; payload }) ->
             Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload
-            >>= fun () -> write_comm oc @@ Ack { msg_sent_at = sent_at }
+            >>= fun () -> Comm.write_comm oc @@ Ack { msg_sent_at = sent_at }
         | Some (Ack { msg_sent_at }) ->
             let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
             Lwt_io.printf "Received & acknowledged in %sms\n"
               (string_of_float roundtrip_ms)
-        | None -> log_info "Client received None")
+        | None -> log_info "Received None")
         >>= fun () -> _read_loop ic oc
-    | None -> log_info "Server closed the connection" >>= return
+    | None -> log_info "Connection closed by another participant" >>= return
+end
 
-  let create_client : string -> int -> unit Lwt.t =
+module Client = struct
+  let start_client : string -> int -> unit Lwt.t =
    fun ip_addr port ->
     let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     let ic = Lwt_io.of_fd ~mode:Lwt_io.Input sock in
@@ -103,89 +107,53 @@ module Client = struct
     in
     Lwt_unix.connect sock server_address
     >>= fun () ->
-    Lwt.async (fun () -> _write_loop oc stop);
-    _read_loop ic oc
+    Lwt.async (fun () -> Shared._write_loop oc stop);
+    Shared._read_loop ic oc
     >>= fun () ->
     Lwt.wakeup_later stop_wakener ();
     return ()
 end
 
-(*BKMRK/NOTE: Refactored to HERE ---- *)
-
 module Server = struct
-  open Comm
-  open Helpers
-
-  let listen_address = Unix.inet_addr_any
-  let backlog = 10
-
-  let rec _write_loop stop oc =
-    Lwt.pick
-      [
-        (Lwt_io.read_line_opt Lwt_io.stdin
-        >>= (function
-              | Some line ->
-                  write_comm oc
-                  @@ Msg { payload = line; sent_at = Unix.gettimeofday () }
-              | None -> log_info "Caught EOF (^D)")
-        >>= fun () -> _write_loop stop oc);
-        stop;
-      ]
-
-  let rec _read_loop ic oc =
-    Lwt_io.read_line_opt ic
-    >>= function
-    | Some json_str ->
-        (match str_to_comm json_str with
-        | Some (Msg { payload; sent_at }) ->
-            Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload
-            >>= fun () -> write_comm oc @@ Ack { msg_sent_at = sent_at }
-        | Some (Ack { msg_sent_at }) ->
-            let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
-            Lwt_io.printf "Received & acknowledged in %sms\n"
-              (string_of_float roundtrip_ms)
-        | None -> log_info "Server receieved None")
-        >>= fun () -> _read_loop ic oc
-    | None -> log_info "Client closed the connection" >>= return
-
   let _accept_connection conn =
     let fd, _ = conn in
     let ic = Lwt_io.of_fd ~mode:Lwt_io.Input fd in
     let oc = Lwt_io.of_fd ~mode:Lwt_io.Output fd in
     let handle_connection ic oc =
       let stop, stop_wakener = Lwt.task () in
-      Lwt.async (fun () -> _write_loop stop oc);
-      _read_loop ic oc
+      Lwt.async (fun () -> Shared._write_loop oc stop);
+      Shared._read_loop ic oc
       >>= fun () ->
       Lwt.wakeup_later stop_wakener ();
       return ()
     in
     Lwt.on_failure (handle_connection ic oc) (fun e ->
         Logs.err (fun m -> m "%s" (Printexc.to_string e)));
-    log_info "New connection" >>= return
+    Helpers.log_info "New connection" >>= return
 
-  let create_socket () =
-    let open Lwt_unix in
-    let sock = socket PF_INET SOCK_STREAM 0 in
-    ignore @@ bind sock @@ ADDR_INET (listen_address, port);
-    listen sock backlog;
-    sock
-
-  let create_server sock =
-    let rec serve () = Lwt_unix.accept sock >>= _accept_connection >>= serve in
-    serve
+  let rec serve (sock : Lwt_unix.file_descr) : unit Lwt.t =
+    Lwt_unix.accept sock >>= _accept_connection >>= fun () -> serve sock
 end
 
-let sock = Server.create_socket ()
+let listen_address = Unix.inet_addr_any
+let backlog = 10
+let port = 12345
+
+let create_socket =
+  let open Lwt_unix in
+  let sock = socket PF_INET SOCK_STREAM 0 in
+  ignore @@ bind sock @@ ADDR_INET (listen_address, port);
+  listen sock backlog;
+  sock
 
 let options =
   [
     ( "--server",
-      Arg.Unit (fun () -> Lwt_main.run @@ Server.create_server sock ()),
+      Arg.Unit (fun () -> Lwt_main.run @@ Server.serve create_socket),
       "Start the server" );
     ( "--client",
       Arg.String
-        (fun ip_addr -> Lwt_main.run @@ Client.create_client ip_addr port),
+        (fun ip_addr -> Lwt_main.run @@ Client.start_client ip_addr port),
       "Start the client at the specified host IP address" );
   ]
 
