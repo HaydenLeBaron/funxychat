@@ -3,10 +3,8 @@ open Lwt.Infix
 
 (*BKMRK/TODO: Handle exceptions from malicious clients *)
 (*  BKMRK/TODO: test badly implemented client sending Json with the wrong field names and/or types. I think it will take the server down.*)
-(*BKMRK/TODO: make multiclient by being able to vary the port (I think) *)
 (*BKMRK/TODO: get client and server to pass in name to put in prompt for eventual multi-client support *)
 (*BKMRK/TODO: implement hostname resolution *)
-(*BKMRK/FIXME: problem where sometimes the old server is running on the old port (could fix with port variation) *)
 
 (** Contains auxillary functions. *)
 module Helpers = struct
@@ -92,7 +90,7 @@ module Shared = struct
               (string_of_float roundtrip_ms)
         | None -> log_info "Received None")
         >>= fun () -> _read_loop ic oc
-    | None -> log_info "Connection closed by another participant" >>= return
+    | None -> log_info "Connection closed by other participant" >>= return
 end
 
 module Client = struct
@@ -135,34 +133,28 @@ module Server = struct
     Lwt_unix.accept sock >>= _accept_connection >>= fun () -> serve sock
 end
 
-let listen_address = Unix.inet_addr_any
-let backlog = 10
-let port = 12345
-
-let create_socket =
-  let open Lwt_unix in
-  let sock = socket PF_INET SOCK_STREAM 0 in
-  ignore @@ bind sock @@ ADDR_INET (listen_address, port);
-  listen sock backlog;
-  sock
-
-let options =
-  [
-    ( "--server",
-      Arg.Unit (fun () -> Lwt_main.run @@ Server.serve create_socket),
-      "Start the server" );
-    ( "--client",
-      Arg.String
-        (fun ip_addr -> Lwt_main.run @@ Client.start_client ip_addr port),
-      "Start the client at the specified host IP address" );
-  ]
-
-let usage_msg = "Usage: ocamlchat (--server | --client [host])"
-
 let () =
+  let listen_address = Unix.inet_addr_any in
+  let backlog = 10 in
+
+  let create_socket port =
+    let open Lwt_unix in
+    let sock = socket PF_INET SOCK_STREAM 0 in
+    ignore @@ bind sock @@ ADDR_INET (listen_address, port);
+    listen sock backlog;
+    sock
+  in
+
   let () = Logs.set_reporter (Logs.format_reporter ()) in
   let () = Logs.set_level (Some Logs.Info) in
-  if Array.length Sys.argv <= 1 then Arg.usage options usage_msg
-  else Arg.parse options (fun _ -> ()) usage_msg
-
+  match Sys.argv with
+  | [| _; "server"; port |] ->
+      let port = int_of_string port in
+      Lwt_main.run @@ Server.serve (create_socket port)
+  | [| _; "client"; host; port |] ->
+      let port = int_of_string port in
+      Lwt_main.run @@ Client.start_client host port
+  | _ ->
+      Printf.printf
+        "Usage:\n\tfunxychat server <port>\n\tfunxychat client <host> <port>\n"
 
