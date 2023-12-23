@@ -59,7 +59,6 @@ module Comm = struct
   let str_to_comm = Yojson.Basic.from_string >> json_to_comm
 end
 
-
 module Client = struct
   open Helpers
   open Comm
@@ -67,48 +66,54 @@ module Client = struct
   let rec write_loop oc stop =
     Lwt.pick
       [
-        (if Lwt_io.is_closed oc then log_info "Connection closed 4" >>= return
-         else
-           Lwt_io.read_line_opt Lwt_io.stdin
-           >>= function
-           | Some line ->
-               Msg { payload = line; sent_at = Unix.gettimeofday () }
-               |> comm_to_str
-               |> fun json_str ->
-               if Lwt_io.is_closed oc then
-                 log_info "Connection closed 5" >>= return
-               else
-                 json_str
-                 |> Lwt_io.write_line oc
-                 >>= fun () -> write_loop oc stop
-           | None -> log_info "Connection closed 6 ^D (EOF)")
-        >>= return;
+        (Lwt_io.read_line_opt Lwt_io.stdin
+        >>= (function
+              | Some line ->
+                  Msg { payload = line; sent_at = Unix.gettimeofday () }
+                  |> write_comm oc
+              | None -> log_info "Connection closed: encountered EOF (^D)")
+        >>= fun () -> write_loop oc stop);
+        (*BKMRK/FIXME: this only stops the write loop, not the read loop!*)
         stop;
       ]
 
+  (* let rec read_loop ic oc =
+     let handle_comm : Comm.t -> unit Lwt.t = function
+       | Msg { sent_at; payload } ->
+           Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload
+           >>= fun () -> Ack { msg_sent_at = sent_at } |> write_comm oc
+       | Ack { msg_sent_at } ->
+           let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
+           Lwt_io.printf "Received & acknowledged in %sms\n"
+             (string_of_float roundtrip_ms)
+     in
+     Lwt_io.read_line_opt ic
+     >>= fun ms ->
+     (*BKMRK/TODO: make point free*)
+     Option.bind ms str_to_comm
+     |> Option.map handle_comm
+     |> Option.value
+          ~default:(log_info "The server closed the connection" >>= return)
+     >>= fun () -> read_loop ic oc *)
+
   let rec read_loop ic oc =
-    if Lwt_io.is_closed oc then log_info "Connection closed 0" >>= return
-    else
-      Lwt_io.read_line_opt ic
-      >>= function
-      | Some json_str -> (
-          match str_to_comm json_str with
-          | Some (Msg { sent_at; payload }) ->
-              Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload
-              >>= fun () ->
-              Ack { msg_sent_at = sent_at }
-              |> write_comm oc
-              >>= fun () -> read_loop ic oc
-          | Some (Ack { msg_sent_at }) ->
-              let roundtrip_ms =
-                (Unix.gettimeofday () -. msg_sent_at) *. 1000.
-              in
-              Lwt_io.printf "Recieved + acknowledged in %sms\n"
-                (string_of_float roundtrip_ms)
-              >>= fun () -> read_loop ic oc
-          | None ->
-              log_info "BKMRK/888 Recieved None" >>= fun () -> read_loop ic oc)
-      | None -> log_info "The server closed the connection" >>= return
+    Lwt_io.read_line_opt ic
+    >>= function
+    | Some json_str -> (
+        match str_to_comm json_str with
+        | Some (Msg { sent_at; payload }) ->
+            Lwt_io.printf "%s>>> %s\n" (timestamp_to_utc_str sent_at) payload
+            >>= fun () ->
+            Ack { msg_sent_at = sent_at }
+            |> write_comm oc
+            >>= fun () -> read_loop ic oc
+        | Some (Ack { msg_sent_at }) ->
+            let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
+            Lwt_io.printf "Received & acknowledged in %sms\n"
+              (string_of_float roundtrip_ms)
+            >>= fun () -> read_loop ic oc
+        | None -> log_info "Client received None" >>= fun () -> read_loop ic oc)
+    | None -> log_info "The server closed the connection" >>= return
 
   let create_client : string -> int -> unit Lwt.t =
    fun ip_addr port ->
@@ -178,10 +183,10 @@ module Server = struct
                 let roundtrip_ms =
                   (Unix.gettimeofday () -. msg_sent_at) *. 1000.
                 in
-                Lwt_io.printf "Recieved + acknowledged in %sms\n"
+                Lwt_io.printf "Received & acknowledged in %sms\n"
                   (string_of_float roundtrip_ms)
                 >>= read_loop
-            | None -> log_info "BKMRK/777 Recieved None" >>= read_loop)
+            | None -> log_info "BKMRK/777 Received None" >>= read_loop)
         | None -> log_info "Client closed the connection" >>= return
     in
     Lwt.async write_loop;
