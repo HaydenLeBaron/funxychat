@@ -95,16 +95,15 @@ end
 
 module Client = struct
   let start_client : string -> int -> unit Lwt.t =
-   fun ip_addr port ->
-    let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    let ic = Lwt_io.of_fd ~mode:Lwt_io.Input sock in
-    let oc = Lwt_io.of_fd ~mode:Lwt_io.Output sock in
-    let stop, stop_wakener = Lwt.task () in
-    let server_address =
-      Unix.ADDR_INET (Unix.inet_addr_of_string ip_addr, port)
+   fun host port ->
+    let server_addr =
+      try (Unix.gethostbyname host).Unix.h_addr_list.(0)
+      with Not_found -> failwith ("Unknown host: " ^ host)
     in
-    Lwt_unix.connect sock server_address
-    >>= fun () ->
+    let sock = Unix.ADDR_INET (server_addr, port) in
+    Lwt_io.open_connection sock
+    >>= fun (ic, oc) ->
+    let stop, stop_wakener = Lwt.task () in
     Lwt.async (fun () -> Shared._write_loop oc stop);
     Shared._read_loop ic oc
     >>= fun () ->
