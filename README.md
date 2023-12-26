@@ -58,6 +58,8 @@ opam install dune merlin ocaml-lsp-server odoc ocamlformat utop dune-release use
 
 # add to ~/.bashrc or equivalent
 export PATH="~/.opam/5.1.0/bin/:$PATH"
+
+# load bashrc
 source ~/.bashrc
 
 # Install libraries for funxychat
@@ -65,6 +67,7 @@ opam install yojson lwt
 
 # On the machine running the server (AWS console if using lightsail), 
 ## open the firewall to the desired ports. I opened 12345-12350 to TCP and UDP connections.
+
 ```
 
 ## Usage

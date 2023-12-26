@@ -12,11 +12,22 @@ module Helpers = struct
   let ( >> ) f g x = g (f x)
   let log_info s = Logs_lwt.info (fun m -> m s)
 
-  let print_splash_screen filename =
-    let read_file filename =
-      Lwt_io.with_file ~mode:Lwt_io.Input filename Lwt_io.read
-    in
-    read_file filename >>= Lwt_io.print
+  let print_splash_screen () =
+    Lwt_io.print
+      {|
+              ,,___
+    ..  ..   / ⌐■-■\  ファンキータイム!    .---.
+   /--'/--\  \-' W|       .----.      .'     '.
+  /        \_/ / |      .'      '... '         '-.
+.'\  \__\  __.'.'     .'          ?-._
+  )\ |  )\ |      _.'
+ // \\ // \\
+||_  \\|_  \\_
+'--' '--'' '--'
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+let sGet = fun (x y) -> ....
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+|}
 end
 
 (** Communication structure(s) and their (en/de)coding. *)
@@ -149,15 +160,14 @@ let () =
   | [| _; "server"; port |] ->
       let port = int_of_string port in
       Lwt_main.run
-        (Helpers.print_splash_screen "bin/splashscreen.txt"
+        (Helpers.print_splash_screen ()
         >>= fun () -> Server.serve (Server.create_socket port))
   | [| _; "client"; host; port |] ->
       let port = int_of_string port in
       Lwt_main.run
-        (Helpers.print_splash_screen "bin/splashscreen.txt"
+        (Helpers.print_splash_screen ()
         >>= fun () -> Client.start_client host port)
   | _ ->
       Printf.printf
         "Usage:\n\tfunxychat server <port>\n\tfunxychat client <host> <port>\n"
-
 
