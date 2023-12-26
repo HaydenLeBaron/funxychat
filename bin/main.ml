@@ -1,18 +1,3 @@
-(* Simple one on one chat.
-
-   Application should start in two modes:
-
-   - as a server, waiting for one client to connect or;
-   - as a client, taking an IP address (or hostname) of server to connect to.
-
-   After connection is established, user on either side (server and client) can
-   send messages to the other side. After connection is terminated by the client,
-   server continues waiting for another client. The receiving side should
-   acknowledge every incoming message (automatically send back a "message received"
-   indication), sending side should show the roundtrip time for acknowledgment.
-   Wire protocol shouldn't make any assumptions on the message contents (e.g.
-   allowed byte values, character encoding, etc). *)
-
 open Lwt
 open Lwt.Infix
 
@@ -164,12 +149,12 @@ let () =
   | [| _; "server"; port |] ->
       let port = int_of_string port in
       Lwt_main.run
-        (Helpers.print_splash_screen "./splashscreen.txt"
+        (Helpers.print_splash_screen "bin/splashscreen.txt"
         >>= fun () -> Server.serve (Server.create_socket port))
   | [| _; "client"; host; port |] ->
       let port = int_of_string port in
       Lwt_main.run
-        (Helpers.print_splash_screen "./splashscreen.txt"
+        (Helpers.print_splash_screen "bin/splashscreen.txt"
         >>= fun () -> Client.start_client host port)
   | _ ->
       Printf.printf
