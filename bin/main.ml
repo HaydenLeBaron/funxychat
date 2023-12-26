@@ -26,6 +26,12 @@ module Helpers = struct
 
   let ( >> ) f g x = g (f x)
   let log_info s = Logs_lwt.info (fun m -> m s)
+
+  let print_splash_screen filename =
+    let read_file filename =
+      Lwt_io.with_file ~mode:Lwt_io.Input filename Lwt_io.read
+    in
+    read_file filename >>= Lwt_io.print
 end
 
 (** Communication structure(s) and their (en/de)coding. *)
@@ -81,7 +87,7 @@ module Shared = struct
               | Some line ->
                   Comm.write_comm oc
                   @@ Msg { payload = line; sent_at = Unix.gettimeofday () }
-              | None -> log_info "Caught EOF (^D)")
+              | None -> log_info "[Caught EOF (^D)]")
         >>= fun () -> _write_loop oc stop);
         stop;
       ]
@@ -96,11 +102,11 @@ module Shared = struct
             >>= fun () -> Comm.write_comm oc @@ Ack { msg_sent_at = sent_at }
         | Some (Ack { msg_sent_at }) ->
             let roundtrip_ms = (Unix.gettimeofday () -. msg_sent_at) *. 1000. in
-            Lwt_io.printf "Received & acknowledged in %sms\n"
+            Lwt_io.printf "[Received & acknowledged in %sms]\n"
               (string_of_float roundtrip_ms)
-        | None -> log_info "Received None")
+        | None -> log_info "[Received None]")
         >>= fun () -> _read_loop ic oc
-    | None -> log_info "Connection closed by other participant" >>= return
+    | None -> log_info "[Connection closed by other participant]" >>= return
 end
 
 module Client = struct
@@ -147,7 +153,7 @@ module Server = struct
         Logs.err (fun m -> m "%s" (Printexc.to_string e)));
     Helpers.log_info "New connection" >>= return
 
-  let rec serve (sock : Lwt_unix.file_descr) : unit Lwt.t =
+  let rec serve (sock : Lwt_unix.file_descr) =
     Lwt_unix.accept sock >>= _accept_connection >>= fun () -> serve sock
 end
 
@@ -157,11 +163,16 @@ let () =
   match Sys.argv with
   | [| _; "server"; port |] ->
       let port = int_of_string port in
-      Lwt_main.run @@ Server.serve (Server.create_socket port)
+      Lwt_main.run
+        (Helpers.print_splash_screen "./splashscreen.txt"
+        >>= fun () -> Server.serve (Server.create_socket port))
   | [| _; "client"; host; port |] ->
       let port = int_of_string port in
-      Lwt_main.run @@ Client.start_client host port
+      Lwt_main.run
+        (Helpers.print_splash_screen "./splashscreen.txt"
+        >>= fun () -> Client.start_client host port)
   | _ ->
       Printf.printf
         "Usage:\n\tfunxychat server <port>\n\tfunxychat client <host> <port>\n"
+
 
