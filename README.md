@@ -15,6 +15,8 @@ let sGet = fun x y -> "CHAT"
 *)
 ```
 
+See it tested here: https://youtu.be/RipQVOKYafk
+
 ## Problem Specification
 
 Simple one on one chat.
@@ -99,4 +101,3 @@ because there may be an existing process running on this port that may take up t
 In this case, restart the server on a different port that is allowed by your server machine's 
 firewall rules (or try again in a few seconds).
 - The networking code is only intended to support a handshake and conversation between one client and one server at a time (though the client can quit and another or same client can quit and rejoin freely). The server will not prevent multiple clients from connecting, but in this case both clients will be able to message the server and the server's messages will alternate sending between the two clients.
-
