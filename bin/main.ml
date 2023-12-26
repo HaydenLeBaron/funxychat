@@ -1,10 +1,20 @@
+(* Simple one on one chat.
+
+   Application should start in two modes:
+
+   - as a server, waiting for one client to connect or;
+   - as a client, taking an IP address (or hostname) of server to connect to.
+
+   After connection is established, user on either side (server and client) can
+   send messages to the other side. After connection is terminated by the client,
+   server continues waiting for another client. The receiving side should
+   acknowledge every incoming message (automatically send back a "message received"
+   indication), sending side should show the roundtrip time for acknowledgment.
+   Wire protocol shouldn't make any assumptions on the message contents (e.g.
+   allowed byte values, character encoding, etc). *)
+
 open Lwt
 open Lwt.Infix
-
-(*BKMRK/TODO: Handle exceptions from malicious clients *)
-(*  BKMRK/TODO: test badly implemented client sending Json with the wrong field names and/or types. I think it will take the server down.*)
-(*BKMRK/TODO: get client and server to pass in name to put in prompt for eventual multi-client support *)
-(*BKMRK/TODO: implement hostname resolution *)
 
 (** Contains auxillary functions. *)
 module Helpers = struct
@@ -18,7 +28,7 @@ module Helpers = struct
   let log_info s = Logs_lwt.info (fun m -> m s)
 end
 
-(** Communication structure(s) and related. *)
+(** Communication structure(s) and their (en/de)coding. *)
 module Comm = struct
   open Helpers
 
@@ -112,6 +122,15 @@ module Client = struct
 end
 
 module Server = struct
+  let create_socket port =
+    let open Lwt_unix in
+    let listen_address = Unix.inet_addr_any in
+    let backlog = 10 in
+    let sock = socket PF_INET SOCK_STREAM 0 in
+    ignore @@ bind sock @@ ADDR_INET (listen_address, port);
+    listen sock backlog;
+    sock
+
   let _accept_connection conn =
     let fd, _ = conn in
     let ic = Lwt_io.of_fd ~mode:Lwt_io.Input fd in
@@ -133,23 +152,12 @@ module Server = struct
 end
 
 let () =
-  let listen_address = Unix.inet_addr_any in
-  let backlog = 10 in
-
-  let create_socket port =
-    let open Lwt_unix in
-    let sock = socket PF_INET SOCK_STREAM 0 in
-    ignore @@ bind sock @@ ADDR_INET (listen_address, port);
-    listen sock backlog;
-    sock
-  in
-
   let () = Logs.set_reporter (Logs.format_reporter ()) in
   let () = Logs.set_level (Some Logs.Info) in
   match Sys.argv with
   | [| _; "server"; port |] ->
       let port = int_of_string port in
-      Lwt_main.run @@ Server.serve (create_socket port)
+      Lwt_main.run @@ Server.serve (Server.create_socket port)
   | [| _; "client"; host; port |] ->
       let port = int_of_string port in
       Lwt_main.run @@ Client.start_client host port
