@@ -92,7 +92,7 @@ $ dune exec -- funxychat client [host-name/ip] [port-number]
 - Try editing the encoding and decoding code on the client side and make sure a malicious client implementation can't cause the server to crash.
 - When connected to a remote host, try disconnecting the client from wifi, send a message, then in ~10 seconds reconnect to wifi. The total roundtrip time of ~10s should be correctly displayed.
 
-## Known limitations
+## Limitations
 
 - Known issue: in some cases the server program won't restart immediately after a SIGTERM (^C)
 because there may be an existing process running on this port that may take up to 30s to shut down. 
